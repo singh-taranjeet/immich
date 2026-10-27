@@ -1,0 +1,43 @@
+name: Household guard
+
+# The household fork must never add or change database migrations: the fork has to
+# stay schema-identical to its upstream base so the database can always move to a
+# plain upstream release. Fails if anything under server/src/schema/migrations/
+# differs from the tag in household/BASE_TAG.
+
+on:
+  push:
+    branches: [household]
+  pull_request:
+    branches: [household]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  no-migrations:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Check migrations against base tag
+        run: |
+          set -euo pipefail
+          base=$(tr -d '[:space:]' < household/BASE_TAG)
+          if ! git rev-parse -q --verify "refs/tags/${base}" >/dev/null; then
+            git fetch --no-tags https://github.com/immich-app/immich.git "refs/tags/${base}:refs/tags/${base}"
+          fi
+          changed=$(git diff --name-status "${base}" HEAD -- server/src/schema/migrations/)
+          if [[ -n "${changed}" ]]; then
+            echo "::error::household branch changes DB migrations relative to ${base}:"
+            echo "${changed}"
+            exit 1
+          fi
+          echo "OK: no migration changes relative to ${base}"

@@ -1,0 +1,55 @@
+name: Household build (arm64)
+
+# Builds the household fork's arm64 images and pushes them to
+# ghcr.io/<owner>/immich-server and ghcr.io/<owner>/immich-machine-learning.
+# Triggered by pushing a tag like v3.3.5-hh.1, or by hand.
+
+on:
+  push:
+    tags: ['v*-hh.*']
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  server:
+    name: Build and Push Server (arm64)
+    # Same reusable workflow upstream's docker.yml uses, pinned to the same commit.
+    uses: immich-app/devtools/.github/workflows/multi-runner-build.yml@4d420cf8e5ea499f99b2c2849ff9a219d5f7b178 # multi-runner-build-workflow-v4.0.0
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+    with:
+      image: immich-server
+      context: .
+      dockerfile: server/Dockerfile
+      platforms: linux/arm64
+      runner-mapping: '{"linux/arm64": "ubuntu-24.04-arm"}'
+      tags: &tag-rules |
+        type=ref,event=tag
+        type=ref,event=branch
+        type=sha,format=long,prefix=commit-
+      build-args: |
+        DEVICE=cpu
+
+  machine-learning:
+    name: Build and Push ML (cpu, arm64)
+    uses: immich-app/devtools/.github/workflows/multi-runner-build.yml@4d420cf8e5ea499f99b2c2849ff9a219d5f7b178 # multi-runner-build-workflow-v4.0.0
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+    with:
+      image: immich-machine-learning
+      context: machine-learning
+      dockerfile: machine-learning/Dockerfile
+      platforms: linux/arm64
+      runner-mapping: '{"linux/arm64": "ubuntu-24.04-arm"}'
+      tags: *tag-rules
+      build-args: |
+        DEVICE=cpu

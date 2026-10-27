@@ -1,0 +1,64 @@
+name: Household upstream watch
+
+# Daily: if immich-app/immich has a stable release newer than household/BASE_TAG,
+# open an issue in this fork (never a PR). Skips prereleases, drafts and -rc tags.
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: household
+
+      - name: Compare upstream release with base tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          base=$(tr -d '[:space:]' < household/BASE_TAG)
+          latest=$(gh api 'repos/immich-app/immich/releases?per_page=50' \
+            --jq '[.[] | select(.draft == false and .prerelease == false) | .tag_name
+                   | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))] | .[]' \
+            | sort -V | tail -1)
+          echo "base=${base} latest-upstream=${latest}"
+          if [[ -z "${latest}" ]]; then
+            echo "::error::Could not determine latest upstream release"; exit 1
+          fi
+          newest=$(printf '%s\n%s\n' "${base}" "${latest}" | sort -V | tail -1)
+          if [[ "${latest}" == "${base}" || "${newest}" == "${base}" ]]; then
+            echo "Up to date."; exit 0
+          fi
+          title="Upstream release ${latest} available"
+          existing=$(gh issue list --repo "${REPO}" --state open --limit 500 --json title \
+            | jq --arg t "${title}" '[.[] | select(.title == $t)] | length')
+          if [[ "${existing}" != "0" ]]; then
+            echo "Issue already open: ${title}"; exit 0
+          fi
+          body=$(cat <<BODY
+          Upstream immich-app/immich released **${latest}** (household base is **${base}**).
+
+          Release notes: https://github.com/immich-app/immich/releases/tag/${latest}
+
+          Update routine (see household/README.md):
+          1. \`git fetch upstream --tags\`
+          2. \`git rebase --onto ${latest} ${base} household\`
+          3. update household/BASE_TAG to ${latest}, push household (force-with-lease)
+          4. \`household/disable-upstream-workflows.sh\`
+          5. tag \`${latest}-hh.1\` and push it; CI builds the arm64 images
+          BODY
+          )
+          gh issue create --repo "${REPO}" --title "${title}" --body "${body}"
